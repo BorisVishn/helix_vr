@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Alpha Helix VR</title>
+<style>
+  body { margin:0; overflow:hidden; background:black; }
+</style>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'https://esm.sh/three@0.160.0';
+import { OrbitControls } from 'https://esm.sh/three@0.160.0/examples/jsm/controls/OrbitControls';
+import { VRButton } from 'https://esm.sh/three@0.160.0/examples/jsm/webxr/VRButton';
+
+let scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+
+let camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100);
+camera.position.set(0, 1.6, 6);
+
+let renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+document.body.appendChild(VRButton.createButton(renderer));
+
+let controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0,1.5,0);
+controls.update();
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
+scene.add(new THREE.DirectionalLight(0xffffff, 0.8));
+
+let helixGroup = new THREE.Group();
+scene.add(helixGroup);
+
+function aaColor(a){
+  if("AVLIMFWP".includes(a)) return 0xFFD700;
+  if("STNQ".includes(a)) return 0x00CED1;
+  if("KRH".includes(a)) return 0xFF4500;
+  if("DE".includes(a)) return 0xDC143C;
+  return 0xffffff;
+}
+
+function makeSprite(letter,color){
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = "#" + color.toString(16).padStart(6,'0');
+  ctx.font = "Bold 180px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(letter,128,128);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({map:tex, transparent:true});
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(0.5,0.5,1);
+  return sprite;
+}
+
+fetch('helix.json')
+.then(r=>r.json())
+.then(data=>{
+  const pts=[];
+  data.forEach(res=>{
+    const p = new THREE.Vector3(res.x/2, res.y/2+1.5, -res.z/4);
+    pts.push(p);
+    const s = makeSprite(res.residue, aaColor(res.residue));
+    s.position.copy(p);
+    helixGroup.add(s);
+  });
+
+  const curve = new THREE.CatmullRomCurve3(pts);
+  const tube = new THREE.Mesh(
+    new THREE.TubeGeometry(curve, 200, 0.01, 8, false),
+    new THREE.MeshStandardMaterial({color:0xaaaaaa})
+  );
+  helixGroup.add(tube);
+});
+
+const controller = renderer.xr.getController(0);
+scene.add(controller);
+let rotating=false;
+controller.addEventListener('selectstart', ()=>rotating=true);
+controller.addEventListener('selectend', ()=>rotating=false);
+
+renderer.setAnimationLoop(()=>{
+  if(rotating) helixGroup.rotation.y += 0.02;
+  renderer.render(scene,camera);
+});
+
+window.addEventListener('resize',()=>{
+  camera.aspect=window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth,window.innerHeight);
+});
+</script>
+</body>
+</html>
