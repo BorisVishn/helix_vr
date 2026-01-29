@@ -1,10 +1,11 @@
-
 <!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <title>Helix VR</title>
-<style>body { margin:0; overflow:hidden; background:black; }</style>
+<style>
+body { margin:0; overflow:hidden; background:black; }
+</style>
 </head>
 <body>
 <script type="module">
@@ -77,36 +78,47 @@ const tube = new THREE.Mesh(
 );
 helixGroup.add(tube);
 
-// ===== VR SCALING =====
+// ===== VR INTERACTION =====
 const controller1 = renderer.xr.getController(0);
 const controller2 = renderer.xr.getController(1);
 scene.add(controller1);
 scene.add(controller2);
 
-let startDist = 0;
-let startScale = 1;
-let scaling = false;
+let scaling=false, rotating=false;
+let startDist=0, startScale=1;
+let startQuat=new THREE.Quaternion();
+let startControllerQuat=new THREE.Quaternion();
 
+function getWorldQuat(obj){ const q=new THREE.Quaternion(); obj.getWorldQuaternion(q); return q; }
 function distance(a,b){ return a.position.distanceTo(b.position); }
 
 controller1.addEventListener('selectstart', ()=>{
-  controller1.userData.selecting = true;
+  controller1.userData.selecting=true;
   if(controller2.userData.selecting){
-    scaling = true;
-    startDist = distance(controller1, controller2);
-    startScale = helixGroup.scale.x;
+    scaling=true;
+    startDist=distance(controller1,controller2);
+    startScale=helixGroup.scale.x;
+  } else {
+    rotating=true;
+    startQuat.copy(helixGroup.quaternion);
+    startControllerQuat.copy(getWorldQuat(controller1));
   }
 });
-controller1.addEventListener('selectend', ()=>{ controller1.userData.selecting=false; scaling=false; });
 
+controller1.addEventListener('selectend', ()=>{ rotating=false; scaling=false; controller1.userData.selecting=false; });
 controller2.addEventListener('selectstart', ()=>{ controller2.userData.selecting=true; });
-controller2.addEventListener('selectend', ()=>{ controller2.userData.selecting=false; scaling=false; });
+controller2.addEventListener('selectend', ()=>{ scaling=false; controller2.userData.selecting=false; });
 
 renderer.setAnimationLoop(()=>{
   if(scaling){
-    let newDist = distance(controller1, controller2);
-    let factor = newDist / startDist;
-    helixGroup.scale.setScalar(startScale * factor);
+    let newDist=distance(controller1,controller2);
+    let factor=newDist/startDist;
+    helixGroup.scale.setScalar(startScale*factor);
+  }
+  if(rotating && !scaling){
+    let currentQuat=getWorldQuat(controller1);
+    let delta=currentQuat.clone().multiply(startControllerQuat.clone().invert());
+    helixGroup.quaternion.copy(delta.multiply(startQuat));
   }
   renderer.render(scene,camera);
 });
