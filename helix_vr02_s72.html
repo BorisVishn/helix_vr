@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Helix VR</title>
+<style>body { margin:0; overflow:hidden; background:black; }</style>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'https://esm.sh/three@0.160.0';
+import { OrbitControls } from 'https://esm.sh/three@0.160.0/examples/jsm/controls/OrbitControls';
+import { VRButton } from 'https://esm.sh/three@0.160.0/examples/jsm/webxr/VRButton';
+
+const helixData = [{"residue": "M", "x": 2.3, "y": 0.0, "z": 0.0}, {"residue": "K", "x": -0.39939080863393966, "y": 2.265057831928078, "z": 1.5}, {"residue": "L", "x": -2.1612930278075893, "y": -0.7866463296490378, "z": 3.0}, {"residue": "L", "x": 1.1500000000000001, "y": -1.9918584287042087, "z": 4.5}, {"residue": "V", "x": 1.7619022191736495, "y": 1.47841150227904, "z": 6.0}, {"residue": "L", "x": -1.76190221917365, "y": 1.4784115022790396, "z": 7.5}, {"residue": "L", "x": -1.1499999999999995, "y": -1.991858428704209, "z": 9.0}, {"residue": "C", "x": 2.161293027807589, "y": -0.7866463296490382, "z": 10.5}, {"residue": "L", "x": 0.39939080863394055, "y": 2.265057831928078, "z": 12.0}, {"residue": "A", "x": -2.3, "y": 1.4083438190194562e-15, "z": 13.5}, {"residue": "S", "x": 0.39939080863394183, "y": -2.265057831928078, "z": 15.0}, {"residue": "D", "x": 2.16129302780759, "y": 0.7866463296490356, "z": 16.5}, {"residue": "G", "x": -1.1500000000000006, "y": 1.9918584287042083, "z": 18.0}, {"residue": "E", "x": -1.7619022191736518, "y": -1.4784115022790374, "z": 19.5}, {"residue": "Q", "x": 1.761902219173649, "y": -1.4784115022790407, "z": 21.0}, {"residue": "V", "x": 1.1500000000000044, "y": 1.991858428704206, "z": 22.5}, {"residue": "Y", "x": -2.1612930278075884, "y": 0.7866463296490395, "z": 24.0}, {"residue": "Q", "x": -0.39939080863393794, "y": -2.265057831928079, "z": 25.5}, {"residue": "V", "x": 2.3, "y": -2.8166876380389124e-15, "z": 27.0}, {"residue": "K", "x": -0.3993908086339324, "y": 2.2650578319280794, "z": 28.5}];
+
+// === SCENE ===
+let scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+
+let camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 200);
+camera.position.set(0, 1.6, 6);
+
+let renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+document.body.appendChild(VRButton.createButton(renderer));
+
+let controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0,1.5,0);
+controls.update();
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
+scene.add(new THREE.DirectionalLight(0xffffff, 0.8));
+
+let helixGroup = new THREE.Group();
+scene.add(helixGroup);
+
+// === GROUP DEFINITIONS ===
+const groups = {
+  hydrophobic: { letters:"AVLIMFWP", color:0xFFD700, visible:true, sprites:[] },
+  polar: { letters:"STNQYC", color:0x00CED1, visible:true, sprites:[] },
+  positive: { letters:"KRH", color:0xFF4500, visible:true, sprites:[] },
+  negative: { letters:"DE", color:0xDC143C, visible:true, sprites:[] }
+};
+
+function findGroup(a){ return Object.values(groups).find(g=>g.letters.includes(a)); }
+
+function makeSprite(letter,color){
+  const canvas=document.createElement('canvas');
+  canvas.width=canvas.height=256;
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle="#" + color.toString(16).padStart(6,'0');
+  ctx.font="Bold 180px Arial";
+  ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillText(letter,128,128);
+  const tex=new THREE.CanvasTexture(canvas);
+  const mat=new THREE.SpriteMaterial({map:tex, transparent:true});
+  const s=new THREE.Sprite(mat);
+  s.scale.set(0.5,0.5,1);
+  return s;
+}
+
+// === BUILD HELIX ===
+const pts=[];
+helixData.forEach(res=>{
+  const p=new THREE.Vector3(res.x/2,res.y/2+1.5,-res.z/4);
+  pts.push(p);
+  const g=findGroup(res.residue);
+  if(!g) return;
+  const s=makeSprite(res.residue,g.color);
+  s.position.copy(p);
+  helixGroup.add(s);
+  g.sprites.push(s);
+});
+
+const ribbon=new THREE.Mesh(
+  new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),200,0.02,8,false),
+  new THREE.MeshStandardMaterial({color:0xaaaaaa})
+);
+helixGroup.add(ribbon);
+
+// === STATIC MENU ===
+const menu = new THREE.Group();
+menu.position.set(-2,2,-3); //fixed
+scene.add(menu);
+
+function makeButton(label,y,callback){
+  const canvas=document.createElement('canvas');
+  canvas.width=512; canvas.height=128;
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle="#111"; ctx.fillRect(0,0,512,128);
+  ctx.fillStyle="#0f0"; ctx.font="72px Arial";
+  ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillText(label,256,64);
+  const tex=new THREE.CanvasTexture(canvas);
+  const mat=new THREE.MeshBasicMaterial({map:tex});
+  const mesh=new THREE.Mesh(new THREE.PlaneGeometry(1.2,0.3),mat);
+  mesh.position.set(0,y,0);
+  mesh.userData.callback=callback;
+  menu.add(mesh);
+}
+
+function toggleGroup(name){
+  const g=groups[name];
+  g.visible=!g.visible;
+  g.sprites.forEach(s=>s.visible=g.visible);
+}
+
+makeButton("Hydrophobic",0.8,()=>toggleGroup("hydrophobic"));
+makeButton("Polar",0.4,()=>toggleGroup("polar"));
+makeButton("Positive",0,()=>toggleGroup("positive"));
+makeButton("Negative",-0.4,()=>toggleGroup("negative"));
+makeButton("Ribbon",-0.8,()=> ribbon.visible=!ribbon.visible);
+
+// === DESKTOP MENU CLICK ===
+const raycaster=new THREE.Raycaster();
+const mouse=new THREE.Vector2();
+
+window.addEventListener('click',e=>{
+  if(renderer.xr.isPresenting) return;
+  mouse.x=(e.clientX/window.innerWidth)*2-1;
+  mouse.y=-(e.clientY/window.innerHeight)*2+1;
+  raycaster.setFromCamera(mouse,camera);
+  const hits=raycaster.intersectObjects(menu.children);
+  if(hits.length) hits[0].object.userData.callback();
+});
+
+// === VR CONTROLLERS ===
+const controllerL = renderer.xr.getController(0);
+const controllerR = renderer.xr.getController(1);
+scene.add(controllerL);
+scene.add(controllerR);
+
+function addLaser(ctrl){
+  const g=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0),new THREE.Vector3(0,0,-1)]);
+  const line=new THREE.Line(g,new THREE.LineBasicMaterial({color:0x00ff00}));
+  line.scale.z=5;
+  ctrl.add(line);
+}
+addLaser(controllerL);
+addLaser(controllerR);
+
+// === VR MENU INTERACTION ===
+function checkMenu(ctrl){
+  const tempMatrix=new THREE.Matrix4().identity().extractRotation(ctrl.matrixWorld);
+  raycaster.ray.origin.setFromMatrixPosition(ctrl.matrixWorld);
+  raycaster.ray.direction.set(0,0,-1).applyMatrix4(tempMatrix);
+  const hits=raycaster.intersectObjects(menu.children);
+  if(hits.length) hits[0].object.userData.callback();
+}
+controllerL.addEventListener('selectstart',()=>checkMenu(controllerL));
+controllerR.addEventListener('selectstart',()=>checkMenu(controllerR));
+
+// === VR ROTATION ===
+let rotating=false, activeCtrl=null;
+let startPos=new THREE.Vector3(), startRotX=0, startRotY=0;
+
+function startRotate(ctrl){
+  rotating=true;
+  activeCtrl=ctrl;
+  startPos.copy(ctrl.position);
+  startRotX=helixGroup.rotation.x;
+  startRotY=helixGroup.rotation.y;
+}
+function stopRotate(){ rotating=false; }
+
+controllerL.addEventListener('squeezestart',()=>startRotate(controllerL));
+controllerL.addEventListener('squeezeend',stopRotate);
+controllerR.addEventListener('squeezestart',()=>startRotate(controllerR));
+controllerR.addEventListener('squeezeend',stopRotate);
+
+// === LOOP ===
+renderer.setAnimationLoop(()=>{
+  if(!renderer.xr.isPresenting) controls.update();
+
+  if(rotating){
+    const dx=activeCtrl.position.x-startPos.x;
+    const dy=activeCtrl.position.y-startPos.y;
+    helixGroup.rotation.y=startRotY+dx*3;
+    helixGroup.rotation.x=startRotX+dy*3;
+  }
+
+  renderer.render(scene,camera);
+});
+</script>
+</body>
+</html>
