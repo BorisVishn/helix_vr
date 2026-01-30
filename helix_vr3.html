@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Helix VR</title>
+<style>body { margin:0; overflow:hidden; background:black; }</style>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'https://esm.sh/three@0.160.0';
+import { OrbitControls } from 'https://esm.sh/three@0.160.0/examples/jsm/controls/OrbitControls';
+import { VRButton } from 'https://esm.sh/three@0.160.0/examples/jsm/webxr/VRButton';
+
+const helixData = [{"residue": "M", "x": 2.3, "y": 0.0, "z": 0.0}, {"residue": "K", "x": -0.39939080863393966, "y": 2.265057831928078, "z": 1.5}, {"residue": "L", "x": -2.1612930278075893, "y": -0.7866463296490378, "z": 3.0}, {"residue": "L", "x": 1.1500000000000001, "y": -1.9918584287042087, "z": 4.5}, {"residue": "V", "x": 1.7619022191736495, "y": 1.47841150227904, "z": 6.0}, {"residue": "L", "x": -1.76190221917365, "y": 1.4784115022790396, "z": 7.5}, {"residue": "L", "x": -1.1499999999999995, "y": -1.991858428704209, "z": 9.0}, {"residue": "C", "x": 2.161293027807589, "y": -0.7866463296490382, "z": 10.5}, {"residue": "L", "x": 0.39939080863394055, "y": 2.265057831928078, "z": 12.0}, {"residue": "A", "x": -2.3, "y": 1.4083438190194562e-15, "z": 13.5}, {"residue": "S", "x": 0.39939080863394183, "y": -2.265057831928078, "z": 15.0}, {"residue": "D", "x": 2.16129302780759, "y": 0.7866463296490356, "z": 16.5}, {"residue": "G", "x": -1.1500000000000006, "y": 1.9918584287042083, "z": 18.0}, {"residue": "E", "x": -1.7619022191736518, "y": -1.4784115022790374, "z": 19.5}, {"residue": "Q", "x": 1.761902219173649, "y": -1.4784115022790407, "z": 21.0}, {"residue": "V", "x": 1.1500000000000044, "y": 1.991858428704206, "z": 22.5}, {"residue": "Y", "x": -2.1612930278075884, "y": 0.7866463296490395, "z": 24.0}, {"residue": "Q", "x": -0.39939080863393794, "y": -2.265057831928079, "z": 25.5}, {"residue": "V", "x": 2.3, "y": -2.8166876380389124e-15, "z": 27.0}, {"residue": "K", "x": -0.3993908086339324, "y": 2.2650578319280794, "z": 28.5}];
+
+let scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+
+let camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 200);
+camera.position.set(0, 1.6, 6);
+
+let renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+document.body.appendChild(VRButton.createButton(renderer));
+
+let controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0,1.5,0);
+controls.update();
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
+scene.add(new THREE.DirectionalLight(0xffffff, 0.8));
+
+let helixGroup = new THREE.Group();
+scene.add(helixGroup);
+
+// ===== BUILD HELIX =====
+function aaColor(a){
+  if("AVLIMFWP".includes(a)) return 0xFFD700;
+  if("STNQ".includes(a)) return 0x00CED1;
+  if("KRH".includes(a)) return 0xFF4500;
+  if("DE".includes(a)) return 0xDC143C;
+  return 0xffffff;
+}
+
+function makeSprite(letter,color){
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = "#" + color.toString(16).padStart(6,'0');
+  ctx.font = "Bold 180px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(letter,128,128);
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({map:tex, transparent:true});
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(0.5,0.5,1);
+  return sprite;
+}
+
+const pts=[];
+const letterGroup = new THREE.Group();
+helixGroup.add(letterGroup);
+
+helixData.forEach(res=>{
+  const p = new THREE.Vector3(res.x/2, res.y/2+1.5, -res.z/4);
+  pts.push(p);
+  const s = makeSprite(res.residue, aaColor(res.residue));
+  s.position.copy(p);
+  letterGroup.add(s);
+});
+
+const ribbon = new THREE.Mesh(
+  new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 200, 0.05, 8, false),
+  new THREE.MeshStandardMaterial({color:0xaaaaaa})
+);
+helixGroup.add(ribbon);
+
+// ===== CONTROLLERS =====
+const controllerL = renderer.xr.getController(0);
+const controllerR = renderer.xr.getController(1);
+scene.add(controllerL);
+scene.add(controllerR);
+
+// lasers
+function addLaser(ctrl){
+  const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
+  const line = new THREE.Line(g, new THREE.LineBasicMaterial({color:0x00ff00}));
+  line.scale.z = 5;
+  ctrl.add(line);
+}
+addLaser(controllerL);
+addLaser(controllerR);
+
+// ===== ROTATION =====
+let rotating=false, rotatingController=null;
+let startPos=new THREE.Vector3(), startRotX=0, startRotY=0;
+
+function startRotate(ctrl){
+  rotating=true;
+  rotatingController=ctrl;
+  startPos.copy(ctrl.position);
+  startRotX=helixGroup.rotation.x;
+  startRotY=helixGroup.rotation.y;
+}
+function stopRotate(){ rotating=false; }
+
+controllerL.addEventListener('selectstart', ()=>startRotate(controllerL));
+controllerL.addEventListener('selectend', stopRotate);
+controllerR.addEventListener('selectstart', ()=>startRotate(controllerR));
+controllerR.addEventListener('selectend', stopRotate);
+
+// ===== SMOOTH SCALING =====
+let scaling=false, startDist=0, targetScale=1;
+
+function distance(a,b){ return a.position.distanceTo(b.position); }
+
+controllerL.addEventListener('squeezestart', ()=>{
+  scaling=true;
+  startDist=distance(controllerL,controllerR);
+  targetScale=helixGroup.scale.x;
+});
+controllerL.addEventListener('squeezeend', ()=> scaling=false);
+
+// ===== LOOP =====
+renderer.setAnimationLoop(()=>{
+
+  // Desktop mouse control only when NOT in VR
+  if(!renderer.xr.isPresenting){
+    controls.update();
+  }
+
+  if(rotating){
+    const dx=rotatingController.position.x-startPos.x;
+    const dy=rotatingController.position.y-startPos.y;
+    helixGroup.rotation.y=startRotY+dx*3;
+    helixGroup.rotation.x=startRotX+dy*3;
+  }
+
+  if(scaling){
+    let newDist=distance(controllerL,controllerR);
+    let factor=newDist/startDist;
+    targetScale = THREE.MathUtils.clamp(targetScale * (1 + (factor-1)*0.1), 0.1, 20);
+  }
+
+  // smooth interpolation
+  helixGroup.scale.lerp(new THREE.Vector3(targetScale,targetScale,targetScale), 0.15);
+
+  renderer.render(scene,camera);
+});
+</script>
+</body>
+</html>
