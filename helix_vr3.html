@@ -73,7 +73,7 @@ helixData.forEach(res=>{
 });
 
 const ribbon = new THREE.Mesh(
-  new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 200, 0.05, 8, false),
+  new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 200, 0.02, 8, false),
   new THREE.MeshStandardMaterial({color:0xaaaaaa})
 );
 helixGroup.add(ribbon);
