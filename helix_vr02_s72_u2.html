@@ -41,7 +41,7 @@ scene.add(helixGroup);
 
 // Amino acid groups
 const groups = {
-  hydrophobic: { letters:"AVLIMFWP", color:0xFFD700, visible:true, sprites:[] },
+  hydrophobic: { letters:"GVLIMFWP", color:0xFFD700, visible:true, sprites:[] },
   polar: { letters:"STNQYC", color:0x00CED1, visible:true, sprites:[] },
   positive: { letters:"KRH", color:0xFF4500, visible:true, sprites:[] },
   negative: { letters:"DE", color:0xDC143C, visible:true, sprites:[] }
@@ -84,7 +84,7 @@ helixData.forEach(res=>{
 
 // Backbone ribbon
 const ribbon=new THREE.Mesh(
-  new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),200,0.05,8,false),
+  new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),200,0.02,8,false),
   new THREE.MeshStandardMaterial({color:0xaaaaaa})
 );
 helixGroup.add(ribbon);
