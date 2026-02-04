@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>helix_vr_full_final_measuring_fixed_updated1</title>
+<style>
+  body { margin:0; overflow:hidden; background:#000; font-family:Arial; color:#0f0; }
+
+  /* Desktop info panel */
+  #info{
+    position:absolute; left:16px; bottom:16px; z-index:10;
+    color:#0f0; font-size:16px; line-height:1.25;
+    background: rgba(0,0,0,0.25);
+    padding:8px 10px;
+    border:1px solid rgba(0,255,0,0.25);
+    border-radius:10px;
+    min-width: 420px;
+  }
+  #statusLine{ opacity:0.85; }
+  #distLine{ font-weight:700; }
+
+  /* Desktop HUD */
+  #hud{
+    position:absolute; top:14px; left:14px; z-index:20;
+    background: rgba(0,0,0,0.35);
+    padding:10px;
+    border:1px solid rgba(0,255,0,0.35);
+    border-radius:12px;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    max-width: 520px;
+  }
+
+  /* 3 columns, 2 rows */
+  #topButtons{
+    display:grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap:6px;
+    align-items:stretch;
+  }
+  #topButtons button{
+    padding:8px 10px;
+    font-size:14px;
+    cursor:pointer;
+    width:100%;
+  }
+
+  #groupsPanel{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+  }
+
+  .groupRow{
+    display:flex; align-items:center; gap:8px;
+    padding:6px 6px;
+    background: rgba(0,0,0,0.20);
+    border:1px solid rgba(0,255,0,0.18);
+    border-radius:12px;
+  }
+
+  .legendBox{
+    width:14px; height:14px; border-radius:3px;
+    border:1px solid rgba(255,255,255,0.3);
+    flex:0 0 auto;
+  }
+
+  .groupBtn{
+    padding:7px 10px;
+    font-size:14px;
+    cursor:pointer;
+    border-radius:10px;
+    border:1px solid rgba(0,255,0,0.35);
+    background: rgba(0,0,0,0.25);
+    color:#0f0;
+  }
+
+  .editBtn{
+    padding:7px 10px;
+    font-size:14px;
+    cursor:pointer;
+    border-radius:10px;
+    border:1px solid rgba(0,255,0,0.25);
+    background: rgba(0,0,0,0.18);
+    color:#0f0;
+  }
+
+  .lettersHint{
+    font-size:13px; opacity:0.8;
+    margin-left:auto;
+    white-space:nowrap;
+  }
+
+  .dimmed{ opacity:0.40; }
+
+  #vrBtn{ position:absolute; bottom:16px; right:16px; padding:10px 14px; z-index:10; }
+</style>
+</head>
+<body>
+
+<div id="info">
+  <div id="statusLine">Status: ready</div>
+  <div id="distLine">Distance: —</div>
+</div>
+
+<div id="hud">
+  <div id="topButtons">
+    <button id="btnMeasure">Measure</button>
+    <button id="btnClear">Clear Measure</button>
+    <button id="btnBackbone">Backbone: ON</button>
+    <button id="btnLetters">Letters: ON</button>
+    <button id="btnResetGroups">Reset Groups</button>
+    <button id="btnResetView">Reset View</button>
+  </div>
+
+  <div style="opacity:0.85; font-size:14px;">
+    Groups (click group to show/hide; EDIT to change letters):
+  </div>
+  <div id="groupsPanel"></div>
+</div>
+
+<button id="vrBtn">ENTER VR</button>
+
+<script src="https://unpkg.com/three@0.141.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.141.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+// ============================================================
+// Core config
+// ============================================================
+const RAY_SIGN = -1;   // If ray clipping is reversed: set to +1
+const LASER_MAX = 6.0;
+
+// ============================================================
+// Desktop / VR tuning parameters
+// ============================================================
+// Local helix baseline used in geometry generation
+const HELIX_DESKTOP_BASE_Y = 0.9;
+
+// Desktop view (OrbitControls) tuning
+const DESKTOP_DESKTOP_BASE_Y = 0.9;   // camera/target vertical center
+// Aliases (fix for earlier rename)
+const DESKTOP_BASE_Y = DESKTOP_DESKTOP_BASE_Y;
+const HELIX_BASE_Y = HELIX_DESKTOP_BASE_Y;
+const DESKTOP_Z = 1.0;        // smaller = larger initial view (camera closer)
+
+// VR initial placement tuning
+const VR_DISTANCE = 1.6;      // meters in front of you
+const VR_DROP = 0.70;         // meters below head height
+const VR_MIN_Y = 0.70;        // floor clamp (meters)
+
+// Debug helpers (toggle in UI)
+let DEBUG_VR = false;
+
+// ============================================================
+// Scene / renderer / camera
+// ============================================================
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.05, 200);
+camera.position.set(0, DESKTOP_BASE_Y, DESKTOP_Z); // larger initial desktop view without object scaling
+camera.lookAt(0, DESKTOP_BASE_Y, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, preserveDrawingBuffer:true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, DESKTOP_BASE_Y, 0);
+controls.update();
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
+const dl = new THREE.DirectionalLight(0xffffff, 0.6);
+dl.position.set(2,4,2);
+scene.add(dl);
+
+const statusLine = document.getElementById("statusLine");
+const distLine   = document.getElementById("distLine");
+const groupsPanel= document.getElementById("groupsPanel");
+
+const raycaster = new THREE.Raycaster();
+
+// Make line raycast less "sticky" so backbone doesn't block residue picking
+raycaster.params.Line = { threshold: 0.004 };
+
+// ============================================================
+// Helix objects
+// ============================================================
+const helix = new THREE.Group();
+scene.add(helix);
+
+const seq = "AEKLIAQGKLETLYQVKGLKQGVKELIAQLGETMYQVKGLKQ";
+const residueColliders = [];
+const letterSprites = [];
+const residuePositions = [];
+
+function makeLetterSprite(letter, initialColor) {
+  const c = document.createElement("canvas");
+  c.width = 128; c.height = 128;
+  const ctx = c.getContext("2d");
+
+  const tex = new THREE.CanvasTexture(c);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent:true });
+  const s = new THREE.Sprite(mat);
+  s.scale.set(0.18, 0.18, 0.18);
+
+  s.userData.ctx = ctx;
+  s.userData.tex = tex;
+  s.userData.letter = letter;
+
+  redrawLetterSprite(s, initialColor);
+  return s;
+}
+
+function redrawLetterSprite(sprite, color) {
+  const ctx = sprite.userData.ctx;
+  const tex = sprite.userData.tex;
+  const letter = sprite.userData.letter;
+
+  ctx.clearRect(0, 0, 128, 128);
+  ctx.fillStyle = color;
+  ctx.font = "bold 96px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(letter, 64, 64);
+
+  tex.needsUpdate = true;
+}
+
+// Helix geometry
+const radius = 0.25;
+const stepZ  = 0.08;
+const turn   = 100 * Math.PI/180;
+
+for (let i=0; i<seq.length; i++) {
+  const a = i * turn;
+  const x = Math.cos(a) * radius;
+  const y = HELIX_BASE_Y + Math.sin(a) * radius;
+  const z = - i * stepZ;
+
+  residuePositions.push(new THREE.Vector3(x,y,z));
+
+  const spr = makeLetterSprite(seq[i], "#00ffcc");
+  spr.position.set(x,y,z);
+  helix.add(spr);
+  letterSprites.push(spr);
+
+  // Larger collider sphere for more stable picking in VR
+  const col = new THREE.Mesh(
+    new THREE.SphereGeometry(0.085, 12, 12),
+    new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0.0 })
+  );
+  col.position.set(x,y,z);
+  col.userData.isResidueCollider = true;
+  col.userData.letter = seq[i];
+  helix.add(col);
+  residueColliders.push(col);
+}
+
+// Backbone line connecting residues
+const backboneGeom = new THREE.BufferGeometry().setFromPoints(residuePositions);
+const backboneMat  = new THREE.LineBasicMaterial({ color:0xaaaaaa });
+const backbone = new THREE.Line(backboneGeom, backboneMat);
+backbone.userData.isBackbone = true;
+helix.add(backbone);
+
+// ============================================================
+// Groups model
+// ============================================================
+const DEFAULT_GROUPS = [
+  { name:"Hydrophobic", color:"#f2c94c", letters:"AILMFWVY" },
+  { name:"Polar",       color:"#56ccf2", letters:"STNQCY" },
+  { name:"Positive",    color:"#6fcf97", letters:"KRH" },
+  { name:"Negative",    color:"#eb5757", letters:"DE" },
+  { name:"Special",     color:"#bb6bd9", letters:"GP" }
+];
+
+let groups = [];
+let groupVisible = {}; // name -> bool
+
+function normalizeLetters(str) {
+  const allowed = "ACDEFGHIKLMNPQRSTVWY";
+  const up = (str||"").toUpperCase().replace(/[^A-Z]/g,"");
+  const seen = new Set();
+  let out = "";
+  for (const ch of up) {
+    if (!allowed.includes(ch)) continue;
+    if (seen.has(ch)) continue;
+    seen.add(ch);
+    out += ch;
+  }
+  return out;
+}
+
+function editGroupLetters(groupName) {
+  const g = groups.find(x => x.name === groupName);
+  if (!g) return;
+
+  const cur = g.letters;
+  const input = prompt(
+    `Edit letters for group "${groupName}".\n`+
+    `Use amino acid one-letter codes (e.g. AILMFWVY).\n`+
+    `Current: ${cur}\n\nNew:`,
+    cur
+  );
+  if (input === null) return;
+
+  g.letters = normalizeLetters(input);
+  rebuildDesktopGroupsUI();
+  rebuildVRMenus();
+  applyVisibilityRules();
+  applyLetterColors();
+  setStatus(`Status: group "${groupName}" updated`);
+  redrawVRInfoIfNeeded();
+}
+
+function resetGroupsToDefault() {
+  groups = DEFAULT_GROUPS.map(g => ({...g}));
+  groupVisible = {};
+  for (const g of groups) groupVisible[g.name] = true;
+
+  rebuildDesktopGroupsUI();
+  rebuildVRMenus();
+  applyVisibilityRules();
+  applyLetterColors();
+  setStatus("Status: groups reset");
+  redrawVRInfoIfNeeded();
+}
+
+function toggleGroup(name) {
+  groupVisible[name] = !groupVisible[name];
+  rebuildDesktopGroupsUI();
+  updateVRMenuLabels();
+  applyVisibilityRules();
+  applyLetterColors();
+}
+
+// ============================================================
+// Visibility + letter coloring rules
+// ============================================================
+let lettersVisible = true;
+let backboneVisible = true;
+
+function colorForLetter(letter) {
+  // Priority: first group in groups[] that contains the letter
+  for (const g of groups) {
+    if (g.letters.includes(letter)) return g.color;
+  }
+  return "#00ffcc";
+}
+
+function letterInAnyVisibleGroup(letter) {
+  let inAny = false;
+  for (const g of groups) {
+    if (!g.letters.includes(letter)) continue;
+    inAny = true;
+    if (groupVisible[g.name]) return true;
+  }
+  return !inAny;
+}
+
+function applyVisibilityRules() {
+  for (const spr of letterSprites) {
+    const L = spr.userData.letter;
+    spr.visible = lettersVisible && letterInAnyVisibleGroup(L);
+  }
+  for (const col of residueColliders) {
+    const L = col.userData.letter;
+    col.visible = lettersVisible && letterInAnyVisibleGroup(L);
+  }
+}
+
+function applyLetterColors() {
+  for (const spr of letterSprites) {
+    redrawLetterSprite(spr, colorForLetter(spr.userData.letter));
+  }
+}
+
+function setLettersVisible(v) {
+  lettersVisible = v;
+  const b = document.getElementById("btnLetters");
+  b.textContent = `Letters: ${lettersVisible ? "ON" : "OFF"}`;
+  b.classList.toggle("dimmed", !lettersVisible);
+  applyVisibilityRules();
+  updateVRMenuLabels();
+}
+
+function setBackboneVisible(v) {
+  backboneVisible = v;
+  backbone.visible = backboneVisible;
+  const b = document.getElementById("btnBackbone");
+  b.textContent = `Backbone: ${backboneVisible ? "ON" : "OFF"}`;
+  b.classList.toggle("dimmed", !backboneVisible);
+  updateVRMenuLabels();
+}
+
+// ============================================================
+// Desktop groups UI
+// ============================================================
+function rebuildDesktopGroupsUI() {
+  groupsPanel.innerHTML = "";
+  for (const g of groups) {
+    const row = document.createElement("div");
+    row.className = "groupRow";
+
+    const leg = document.createElement("div");
+    leg.className = "legendBox";
+    leg.style.background = g.color;
+
+    const btn = document.createElement("button");
+    btn.className = "groupBtn";
+    btn.textContent = g.name;
+    btn.onclick = () => toggleGroup(g.name);
+    btn.classList.toggle("dimmed", !groupVisible[g.name]);
+
+    const edit = document.createElement("button");
+    edit.className = "editBtn";
+    edit.textContent = "EDIT";
+    edit.onclick = () => editGroupLetters(g.name);
+    edit.classList.toggle("dimmed", !groupVisible[g.name]);
+
+    const letters = document.createElement("div");
+    letters.className = "lettersHint";
+    letters.textContent = g.letters ? g.letters : "(empty)";
+
+    row.appendChild(leg);
+    row.appendChild(btn);
+    row.appendChild(edit);
+    row.appendChild(letters);
+    groupsPanel.appendChild(row);
+  }
+
+  document.getElementById("btnLetters").classList.toggle("dimmed", !lettersVisible);
+  document.getElementById("btnBackbone").classList.toggle("dimmed", !backboneVisible);
+}
+
+// ============================================================
+// Status / distance texts
+// ============================================================
+let statusText = "Status: ready";
+let distText = "Distance: —";
+
+function setStatus(t) {
+  statusText = t;
+  statusLine.textContent = t;
+}
+function setDistance(t) {
+  distText = t;
+  distLine.textContent = t;
+}
+
+// ============================================================
+// Measurement tool (markers + line)
+// ============================================================
+let measuring = false;
+let picks = [];
+
+const measureGroup = new THREE.Group();
+helix.add(measureGroup);
+
+let markerA = null;
+let markerB = null;
+let measureLine = null;
+
+function clearMeasureGraphics() {
+  if (markerA) { measureGroup.remove(markerA); markerA.geometry.dispose(); markerA.material.dispose(); markerA = null; }
+  if (markerB) { measureGroup.remove(markerB); markerB.geometry.dispose(); markerB.material.dispose(); markerB = null; }
+  if (measureLine) { measureGroup.remove(measureLine); measureLine.geometry.dispose(); measureLine.material.dispose(); measureLine = null; }
+}
+
+function makeMarker(pos) {
+  const m = new THREE.Mesh(
+    new THREE.SphereGeometry(0.02, 14, 14),
+    new THREE.MeshBasicMaterial({ color:0x00ffcc })
+  );
+  m.position.copy(pos);
+  return m;
+}
+function makeLine(p1, p2) {
+  const geom = new THREE.BufferGeometry().setFromPoints([p1.clone(), p2.clone()]);
+  const mat = new THREE.LineBasicMaterial({ color:0x00ff66 });
+  return new THREE.Line(geom, mat);
+}
+
+function startMeasure() {
+  measuring = true;
+  picks = [];
+  clearMeasureGraphics();
+  setStatus("Status: measuring (pick 2 residues)");
+  setDistance("Distance: —");
+  redrawVRInfoIfNeeded();
+}
+
+function clearMeasure() {
+  measuring = false;
+  picks = [];
+  clearMeasureGraphics();
+  setStatus("Status: ready");
+  setDistance("Distance: —");
+  redrawVRInfoIfNeeded();
+}
+
+function handlePick(point) {
+  const p = point.clone();
+  picks.push(p);
+
+  if (picks.length === 1) {
+    markerA = makeMarker(picks[0]);
+    measureGroup.add(markerA);
+    setDistance("Distance: first point selected");
+    redrawVRInfoIfNeeded();
+  }
+  if (picks.length === 2) {
+    markerB = makeMarker(picks[1]);
+    measureGroup.add(markerB);
+    measureLine = makeLine(picks[0], picks[1]);
+    measureGroup.add(measureLine);
+
+    const distM = picks[0].distanceTo(picks[1]);
+    setDistance(`Distance: ${distM.toFixed(3)} m  (${(distM*10).toFixed(2)} A)`);
+    setStatus("Status: measure done");
+    measuring = false;
+    picks = [];
+    redrawVRInfoIfNeeded();
+  }
+}
+
+// ============================================================
+// Desktop controls
+// ============================================================
+document.getElementById("btnMeasure").addEventListener("click", startMeasure);
+document.getElementById("btnClear").addEventListener("click", clearMeasure);
+document.getElementById("btnBackbone").addEventListener("click", () => setBackboneVisible(!backboneVisible));
+document.getElementById("btnLetters").addEventListener("click", () => setLettersVisible(!lettersVisible));
+document.getElementById("btnResetGroups").addEventListener("click", resetGroupsToDefault);
+
+function resetViewDesktop() {
+  helix.position.set(0,0,0);
+  helix.rotation.set(0,0,0);
+  helix.scale.set(1,1,1);
+
+  camera.position.set(0, DESKTOP_BASE_Y, DESKTOP_Z); // larger initial desktop view without object scaling
+  controls.target.set(0, DESKTOP_BASE_Y, 0);
+  controls.update();
+
+  clearMeasure();
+  setStatus("Status: ready");
+}
+document.getElementById("btnResetView").addEventListener("click", resetViewDesktop);
+
+// Desktop picking
+const mouse = new THREE.Vector2();
+window.addEventListener("click", (e) => {
+  if (renderer.xr.isPresenting) return;
+  if (!measuring) return;
+
+  mouse.x = (e.clientX / innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / innerHeight) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+  helix.updateMatrixWorld(true);
+
+  const hits = raycaster.intersectObjects(residueColliders, true);
+  if (hits.length) handlePick(hits[0].object.position);
+});
+
+// ============================================================
+// VR UI: 3D menu + 3D info panel (smaller + separated)
+// ============================================================
+const menuVR = new THREE.Group();
+scene.add(menuVR);
+
+const vrInfo = new THREE.Group();
+scene.add(vrInfo);
+
+menuVR.visible = false;
+vrInfo.visible = false;
+
+// Smaller VR info panel
+const vrInfoCanvas = document.createElement("canvas");
+vrInfoCanvas.width = 512;
+vrInfoCanvas.height = 256;
+const vrInfoCtx = vrInfoCanvas.getContext("2d");
+const vrInfoTex = new THREE.CanvasTexture(vrInfoCanvas);
+vrInfoTex.minFilter = THREE.LinearFilter;
+vrInfoTex.magFilter = THREE.LinearFilter;
+
+const vrInfoMat = new THREE.MeshBasicMaterial({ map: vrInfoTex, transparent:true, side:THREE.DoubleSide });
+const vrInfoPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 0.38), vrInfoMat);
+vrInfo.add(vrInfoPlane);
+
+const vrInfoCollider = new THREE.Mesh(
+  new THREE.BoxGeometry(0.84, 0.48, 0.08),
+  new THREE.MeshBasicMaterial({ transparent:true, opacity:0.0 })
+);
+vrInfo.add(vrInfoCollider);
+
+function redrawVRInfo() {
+  vrInfoCtx.clearRect(0,0,512,256);
+  vrInfoCtx.fillStyle = "rgba(0,0,0,0.55)";
+  vrInfoCtx.fillRect(0,0,512,256);
+
+  vrInfoCtx.strokeStyle = "rgba(0,255,0,0.45)";
+  vrInfoCtx.lineWidth = 4;
+  vrInfoCtx.strokeRect(6,6,500,244);
+
+  vrInfoCtx.fillStyle = "#00ff66";
+  vrInfoCtx.font = "24px Arial";
+  vrInfoCtx.fillText(statusText, 18, 56);
+
+  vrInfoCtx.fillStyle = "#00ffcc";
+  vrInfoCtx.font = "bold 30px Arial";
+  vrInfoCtx.fillText(distText, 18, 118);
+
+  vrInfoCtx.fillStyle = "rgba(0,255,0,0.65)";
+  vrInfoCtx.font = "20px Arial";
+  vrInfoCtx.fillText("Trigger=click | Squeeze+thumbstick=rotate | Scale=thumbstick", 18, 190);
+
+  vrInfoTex.needsUpdate = true;
+}
+
+function redrawVRInfoIfNeeded() {
+  if (renderer.xr.isPresenting) redrawVRInfo();
+}
+
+// VR menu: smaller buttons + separated columns
+const vrMenuButtons = new Map();
+const vrMenuColliders = [];
+let scaleMode = false;
+let helixScale = 1.0;
+
+function makeVRButton(key, label, x, y, onClick, opts={}) {
+  const w=384, h=72;
+  const c = document.createElement("canvas");
+  c.width=w; c.height=h;
+  const ctx = c.getContext("2d");
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent:true, side:THREE.DoubleSide });
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.13), mat);
+  plane.position.set(x, y, 0);
+
+  const collider = new THREE.Mesh(
+    new THREE.BoxGeometry(0.72, 0.17, 0.08),
+    new THREE.MeshBasicMaterial({ transparent:true, opacity:0.0 })
+  );
+  collider.position.set(x, y, 0);
+  collider.userData.isMenuButton = true;
+  collider.userData.onClick = onClick;
+  collider.userData.key = key;
+
+  vrMenuColliders.push(collider);
+
+  function draw(text, legendColor=null, dim=false) {
+    ctx.clearRect(0,0,w,h);
+
+    ctx.fillStyle = dim ? "rgba(20,20,20,0.55)" : "rgba(17,17,17,0.85)";
+    ctx.fillRect(0,0,w,h);
+
+    ctx.strokeStyle = dim ? "rgba(0,255,0,0.18)" : "rgba(0,255,0,0.35)";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(3,3,w-6,h-6);
+
+    if (legendColor) {
+      ctx.fillStyle = legendColor;
+      ctx.fillRect(12, 20, 20, 20);
+      ctx.strokeStyle = "rgba(255,255,255,0.35)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(12, 20, 20, 20);
+    }
+
+    ctx.fillStyle = dim ? "rgba(0,255,0,0.45)" : "rgba(0,255,0,0.90)";
+    ctx.font = "22px Arial";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    ctx.fillText(text, legendColor ? 44 : 14, h/2 + 1);
+
+    tex.needsUpdate = true;
+  }
+
+  draw(label, opts.legendColor||null, !!opts.dim);
+
+  menuVR.add(plane);
+  menuVR.add(collider);
+
+  vrMenuButtons.set(key, { draw, collider, legendColor: opts.legendColor||null });
+}
+
+
+function exportScreenshot() {
+  try {
+    const a = document.createElement("a");
+    a.download = `helix_screenshot_${Date.now()}.png`;
+    a.href = renderer.domElement.toDataURL("image/png");
+    a.click();
+    setStatus("Status: screenshot saved");
+  } catch (e) {
+    console.error(e);
+    setStatus("Status: screenshot failed (see console)");
+  }
+}
+
+function rebuildVRMenus() {
+  while (menuVR.children.length) menuVR.remove(menuVR.children[0]);
+  vrMenuButtons.clear();
+  vrMenuColliders.length = 0;
+
+  // More separation between columns
+  const xL = -0.50;
+  let yL = 0.30;
+
+  makeVRButton("Measure", "Measure", xL, yL, () => startMeasure()); yL -= 0.16;
+  makeVRButton("Clear", "Clear Measure", xL, yL, () => clearMeasure()); yL -= 0.16;
+
+    makeVRButton("Screenshot", "Screenshot", xL, yL, () => exportScreenshot()); yL -= 0.16;
+
+makeVRButton("Backbone", `Backbone: ${backboneVisible ? "ON":"OFF"}`, xL, yL,
+    () => setBackboneVisible(!backboneVisible),
+    { dim: !backboneVisible }
+  ); yL -= 0.16;
+
+  makeVRButton("Letters", `Letters: ${lettersVisible ? "ON":"OFF"}`, xL, yL,
+    () => setLettersVisible(!lettersVisible),
+    { dim: !lettersVisible }
+  ); yL -= 0.16;
+
+  makeVRButton("ResetGroups", "Reset Groups", xL, yL, () => resetGroupsToDefault()); yL -= 0.16;
+
+  makeVRButton("Scale", `Scale: ${scaleMode ? "ON":"OFF"}`, xL, yL, () => {
+    scaleMode = !scaleMode;
+    setStatus(`Status: scale mode ${scaleMode ? "ON":"OFF"}`);
+    redrawVRInfoIfNeeded();
+    updateVRMenuLabels();
+  }, { dim: !scaleMode }); yL -= 0.16;
+
+  makeVRButton("ResetView", "Reset View", xL, yL, () => resetViewVR()); yL -= 0.16;
+
+  const xR = 0.20;
+  let yR = 0.30;
+
+  makeVRButton("GroupsHeader", "Groups", xR, yR, () => {}, { dim:false });
+  vrMenuButtons.get("GroupsHeader").collider.userData.onClick = null;
+  yR -= 0.16;
+
+  for (const g of groups) {
+    makeVRButton(
+      `G_${g.name}`,
+      g.name,
+      xR, yR,
+      () => toggleGroup(g.name),
+      { legendColor: g.color, dim: !groupVisible[g.name] }
+    );
+    yR -= 0.16;
+  }
+
+  updateVRMenuLabels();
+}
+
+function updateVRMenuLabels() {
+  const bb = vrMenuButtons.get("Backbone");
+  if (bb) bb.draw(`Backbone: ${backboneVisible ? "ON":"OFF"}`, null, !backboneVisible);
+
+  const lt = vrMenuButtons.get("Letters");
+  if (lt) lt.draw(`Letters: ${lettersVisible ? "ON":"OFF"}`, null, !lettersVisible);
+
+  const sc = vrMenuButtons.get("Scale");
+  if (sc) sc.draw(`Scale: ${scaleMode ? "ON":"OFF"}`, null, !scaleMode);
+
+  for (const g of groups) {
+    const t = vrMenuButtons.get(`G_${g.name}`);
+    if (t) t.draw(g.name, g.color, !groupVisible[g.name]);
+  }
+}
+
+// Place helix/menu/info: separated + slightly different Z to avoid overlap
+function placeObjectsInFrontOfUser() {
+  const headPos = new THREE.Vector3();
+  const headDir = new THREE.Vector3();
+  camera.getWorldPosition(headPos);
+  camera.getWorldDirection(headDir);
+
+  const base = headPos.clone().add(headDir.multiplyScalar(1.25));
+  base.y = Math.max(0.8, headPos.y - 0.2);
+
+  helix.position.copy(base);
+  helix.position.y -= HELIX_BASE_Y;
+
+  // Menu: left-top, slightly closer to user than helix
+  menuVR.position.copy(base).add(new THREE.Vector3(-0.75, 0.32, 0.02));
+  menuVR.lookAt(headPos);
+
+  // Info: right-bottom, slightly farther to avoid blocking
+  vrInfo.position.copy(base).add(new THREE.Vector3(0.78, -0.25, 0.08));
+  vrInfo.lookAt(headPos);
+
+  helix.updateMatrixWorld(true);
+  menuVR.updateMatrixWorld(true);
+  vrInfo.updateMatrixWorld(true);
+}
+
+function resetViewVR() {
+  helix.rotation.set(0,0,0);
+  helix.scale.set(1,1,1);
+  helixScale = 1.0;
+  placeObjectsInFrontOfUser();
+  clearMeasure();
+  setStatus("Status: ready");
+  redrawVRInfoIfNeeded();
+}
+
+// ============================================================
+// VR controllers
+// ============================================================
+const vrControllers = [];
+let vrHoverButton = null;
+let vrHoverResidue = null;
+
+function readThumbstickAxes() {
+  const sess = renderer.xr.getSession();
+  if (!sess || !sess.inputSources) return { x:0, y:0, found:false };
+
+  for (const src of sess.inputSources) {
+    if (!src || !src.gamepad) continue;
+    const axes = src.gamepad.axes || [];
+    const x1 = axes[2] || 0, y1 = axes[3] || 0;
+    const x0 = axes[0] || 0, y0 = axes[1] || 0;
+
+    const mag23 = Math.abs(x1) + Math.abs(y1);
+    const mag01 = Math.abs(x0) + Math.abs(y0);
+
+    const x = (mag23 >= mag01) ? x1 : x0;
+    const y = (mag23 >= mag01) ? y1 : y0;
+
+    if (Math.abs(x) > 0.05 || Math.abs(y) > 0.05) {
+      return { x, y, found:true };
+    }
+  }
+  return { x:0, y:0, found:false };
+}
+
+function buildController(index) {
+  const controller = renderer.xr.getController(index);
+  scene.add(controller);
+
+  const g = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0,0,0),
+    new THREE.Vector3(0,0,RAY_SIGN)
+  ]);
+  const m = new THREE.LineBasicMaterial({ color:0x00ff00 });
+  m.depthTest = false;
+  m.transparent = true;
+  m.opacity = 0.95;
+
+  const laser = new THREE.Line(g, m);
+  laser.scale.z = LASER_MAX;
+  laser.renderOrder = 999;
+  controller.add(laser);
+
+  const tip = new THREE.Mesh(
+    new THREE.SphereGeometry(0.01, 12, 12),
+    new THREE.MeshBasicMaterial({ color:0x00ff00, depthTest:false })
+  );
+  tip.renderOrder = 999;
+  laser.add(tip);
+  tip.position.set(0,0,RAY_SIGN);
+
+  controller.userData.connected = false;
+  controller.visible = false;
+
+  controller.addEventListener("connected", (ev) => {
+    const mode = ev && ev.data ? ev.data.targetRayMode : null;
+    if (mode && mode !== "tracked-pointer") {
+      controller.userData.connected = false;
+      controller.visible = false;
+      return;
+    }
+    controller.userData.connected = true;
+    controller.visible = true;
+  });
+
+  controller.addEventListener("disconnected", () => {
+    controller.userData.connected = false;
+    controller.visible = false;
+  });
+
+  controller.addEventListener("selectstart", () => {
+    if (!controller.userData.connected) return;
+
+    if (vrHoverButton && vrHoverButton.userData && typeof vrHoverButton.userData.onClick === "function") {
+      vrHoverButton.userData.onClick();
+      return;
+    }
+
+    if (measuring && vrHoverResidue && vrHoverResidue.userData.isResidueCollider) {
+      handlePick(vrHoverResidue.position);
+    }
+  });
+
+  let rotating = false;
+  controller.addEventListener("squeezestart", () => { if (controller.userData.connected) rotating = true; });
+  controller.addEventListener("squeezeend", () => rotating = false);
+
+  vrControllers.push({ controller, laser, rotatingRef: () => rotating });
+}
+
+buildController(0);
+buildController(1);
+
+// ============================================================
+// VR session button
+// ============================================================
+const vrBtn = document.getElementById("vrBtn");
+
+vrBtn.addEventListener("click", () => {
+  if (renderer.xr.isPresenting) {
+    renderer.xr.getSession().end();
+    return;
+  }
+
+  navigator.xr.requestSession("immersive-vr", { optionalFeatures:["local-floor"] })
+    .then((session) => {
+      renderer.xr.setSession(session);
+      vrBtn.textContent = "EXIT VR";
+
+      document.getElementById("hud").style.display = "none";
+      document.getElementById("info").style.display = "none";
+
+      menuVR.visible = true;
+      vrInfo.visible = true;
+
+      setTimeout(() => {
+        redrawVRInfo();
+        rebuildVRMenus();
+        placeObjectsInFrontOfUser();
+      }, 90);
+
+      session.addEventListener("end", () => {
+        vrBtn.textContent = "ENTER VR";
+
+        document.getElementById("hud").style.display = "flex";
+        document.getElementById("info").style.display = "block";
+
+        menuVR.visible = false;
+        vrInfo.visible = false;
+
+        scaleMode = false;
+        helixScale = 1.0;
+        resetViewDesktop();
+      });
+    });
+});
+
+// ============================================================
+// Animation loop: stable residue picking + separated UI
+// ============================================================
+const _origin = new THREE.Vector3();
+const _quat   = new THREE.Quaternion();
+const _dir    = new THREE.Vector3();
+
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+
+renderer.setAnimationLoop(() => {
+  if (!renderer.xr.isPresenting) controls.update();
+
+  vrHoverButton = null;
+  vrHoverResidue = null;
+
+  if (renderer.xr.isPresenting) {
+    helix.updateMatrixWorld(true);
+    menuVR.updateMatrixWorld(true);
+    vrInfo.updateMatrixWorld(true);
+
+    // During measuring, ignore backbone intersections
+    const backboneTargets = (!measuring && backboneVisible) ? [backbone] : [];
+
+    for (const entry of vrControllers) {
+      const c = entry.controller;
+
+      if (!c.userData.connected || !c.visible) {
+        entry.laser.visible = false;
+        continue;
+      }
+      entry.laser.visible = true;
+
+      c.updateMatrixWorld(true);
+      c.getWorldPosition(_origin);
+      c.getWorldQuaternion(_quat);
+      _dir.set(0,0,RAY_SIGN).applyQuaternion(_quat).normalize();
+
+      raycaster.ray.origin.copy(_origin);
+      raycaster.ray.direction.copy(_dir);
+      raycaster.near = 0.0;
+      raycaster.far  = LASER_MAX;
+
+      // Menu raycast only against colliders
+      const hitMenu = raycaster.intersectObjects(vrMenuColliders, false);
+      const hitInfo = raycaster.intersectObjects([vrInfoCollider], false);
+      const hitRes  = raycaster.intersectObjects(residueColliders, true);
+      const hitBack = backboneTargets.length ? raycaster.intersectObjects(backboneTargets, true) : [];
+
+      // Choose best intersection:
+      // If measuring and a residue is hit, prioritize residue
+      let best = null;
+      if (measuring && hitRes && hitRes.length) {
+        best = hitRes[0];
+      } else {
+        function consider(arr){ if (arr && arr.length){ const h=arr[0]; if(!best||h.distance<best.distance) best=h; } }
+        consider(hitMenu);
+        consider(hitInfo);
+        consider(hitRes);
+        consider(hitBack);
+      }
+
+      entry.laser.scale.z = best ? Math.max(0.05, Math.min(LASER_MAX, best.distance)) : LASER_MAX;
+
+      if (best) {
+        const obj = best.object;
+        if (obj && obj.userData && obj.userData.isMenuButton) {
+          vrHoverButton = obj;
+        } else if (measuring && obj && obj.userData && obj.userData.isResidueCollider) {
+          vrHoverResidue = obj;
+        }
+      }
+    }
+
+    // Rotation: squeeze + thumbstick controls yaw/pitch
+    let anyRot = false;
+    for (const entry of vrControllers) {
+      if (entry.rotatingRef()) { anyRot = true; break; }
+    }
+    if (anyRot) {
+      const axes = readThumbstickAxes();
+      const yawSpeed = 0.06;
+      const pitchSpeed = 0.05;
+
+      if (axes.found) {
+        helix.rotation.y += axes.x * yawSpeed;
+        helix.rotation.x += axes.y * pitchSpeed;
+        helix.rotation.x = clamp(helix.rotation.x, -1.25, 1.25);
+      } else {
+        helix.rotation.y += 0.03;
+      }
+    }
+
+    // Scale mode: thumbstick up/down scales helix
+    if (scaleMode) {
+      const axes = readThumbstickAxes();
+      const speed = 0.02;
+      const delta = -(axes.y || 0) * speed;
+      if (Math.abs(delta) > 0.0005) {
+        helixScale = clamp(helixScale * (1.0 + delta), 0.25, 4.0);
+        helix.scale.set(helixScale, helixScale, helixScale);
+        setStatus(`Status: scale=${helixScale.toFixed(2)}x`);
+        redrawVRInfo();
+      }
+    }
+  }
+
+  if (DEBUG_VR && debugBoxHelper) debugBoxHelper.update();
+  renderer.render(scene, camera);
+});
+
+// ============================================================
+// Resize
+// ============================================================
+window.addEventListener("resize", () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ============================================================
+// Init
+// ============================================================
+resetGroupsToDefault();
+setBackboneVisible(true);
+setLettersVisible(true);
+applyVisibilityRules();
+applyLetterColors();
+rebuildDesktopGroupsUI();
+setStatus("Status: ready");
+setDistance("Distance: —");
+</script>
+</body>
+</html>
